@@ -1,2 +1,2 @@
 # PIDDemo
-Code and desgins for a PID demo stip using a hovering ball
+Code and desgins for a PID demo setup using a hovering ball
