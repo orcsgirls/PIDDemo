@@ -4,7 +4,7 @@ import digitalio
 import pwmio
 import displayio
 import terminalio
-import adafruit_vl53l0x
+import adafruit_vl53l4cd
 from adafruit_display_text import label
 from rainbowio import colorwheel
 from adafruit_simplemath import map_range, constrain
@@ -17,6 +17,9 @@ fan = DCMotor(pwm1, pwm2)
 
 i2c = board.I2C()
 
+sensor = adafruit_vl53l4cd.VL53L4CD(i2c)
+sensor.measurement_timing_budget = 33000 # 33ms is the default - longer more accurate but slower
+
 qt_enc1 = seesaw.Seesaw(i2c, addr=0x36)
 qt_enc2 = seesaw.Seesaw(i2c, addr=0x37)
 qt_enc3 = seesaw.Seesaw(i2c, addr=0x38)
@@ -27,7 +30,7 @@ display = board.DISPLAY
 splash = displayio.Group()
 display.root_group = splash
 
-FONTSCALE = 3
+FONTSCALE = 2
 BACKGROUND_COLOR = 0x00FF00  # Bright Green
 FOREGROUND_COLOR = 0xAA0088  # Purple
 TEXT_COLOR = 0xFFFF00
@@ -45,27 +48,54 @@ splash.append(text_group)
 
 for p in pixels:
     p.brightness = 0.2
-    p.fill(0xff0000)
+    p.fill(0x00ff00)
 
-encoder1 = rotaryio.IncrementalEncoder(qt_enc1)
-encoder2 = rotaryio.IncrementalEncoder(qt_enc2)
-encoder3 = rotaryio.IncrementalEncoder(qt_enc3)
+encoderP = rotaryio.IncrementalEncoder(qt_enc1)
+encoderI = rotaryio.IncrementalEncoder(qt_enc2)
+encoderD = rotaryio.IncrementalEncoder(qt_enc3)
 
-last_position1 = None
-last_position2 = None
-last_position3 = None
+cumError = 0
+rateError = 0
+lastError = 0
+timeStep = 0.1
 
-increment = 0.2
-power = 0.0
-encoder1.position = int(70 / increment)
+# PIDs to tune
+encoderP.position = 1
+encoderI.position = 0
+encoderD.position = 0
+
+# Lift off value
+power=70.
+
+# Setpoint location in mm
+setPoint = 10.0
+
+# Encoder increment
+enc_step = 0.001
+
+sensor.start_ranging()
 
 while True:
-    power = encoder1.position * increment
-    text_area.text = f"P: {power:5.1f}%"
+    while not sensor.data_ready:
+        pass
+    sensor.clear_interrupt()
 
-    fan.throttle = min(power / 100., 1.0)
+    kP = constrain(encoderP.position * enc_step, 0.0, 1.0)
+    kI = constrain(encoderI.position * enc_step, 0.0, 1.0)
+    kD = constrain(encoderD.position * enc_step, 0.0, 1.0)
 
-    print(f"Demo, {power}")
+    current = sensor.distance
+    error = current - setPoint
+    cumError += error * timeStep
+    cumError = 0 if ((error > 0 and lastError < 0) or (error < 0 and lastError > 0)) else cumError
+    rateError = (error - lastError)/timeStep
+    lastError = error
 
-    time.sleep(0.2)
+    new = kP*error + kI*cumError + kD*rateError
+    power = constrain(power+new, 0., 100.)
+    fan.throttle = power / 100.
 
+    print (f"{current:^4.2f}, {error:^4.2f}, {new:^5.3f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+
+    text_area.text = f"E: {error:7.2f}"
+    time.sleep(timeStep)
