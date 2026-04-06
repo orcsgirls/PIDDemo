@@ -10,6 +10,7 @@ from rainbowio import colorwheel
 from adafruit_simplemath import map_range, constrain
 from adafruit_motor.motor import DCMotor
 from adafruit_seesaw import digitalio, rotaryio, seesaw, neopixel
+from adafruit_ht16k33.segments import Seg7x4
 
 pwm1 = pwmio.PWMOut(board.A1, duty_cycle=2 ** 15, frequency=25000)
 pwm2 = pwmio.PWMOut(board.A0, duty_cycle=2 ** 15, frequency=25000)
@@ -17,8 +18,13 @@ fan = DCMotor(pwm1, pwm2)
 
 i2c = board.I2C()
 
+led_display = Seg7x4(i2c)
+led_display.brightness = 0.5
+
 sensor = adafruit_vl53l4cd.VL53L4CD(i2c)
-sensor.measurement_timing_budget = 33000 # 33ms is the default - longer more accurate but slower
+#sensor.measurement_timing_budget = 33000 # 33ms is the default - longer more accurate but slower
+sensor.inter_measurement = 0
+sensor.timing_budget = 200
 
 qt_enc1 = seesaw.Seesaw(i2c, addr=0x36)
 qt_enc2 = seesaw.Seesaw(i2c, addr=0x37)
@@ -30,10 +36,10 @@ display = board.DISPLAY
 splash = displayio.Group()
 display.root_group = splash
 
-FONTSCALE = 2
+FONTSCALE = 3
 BACKGROUND_COLOR = 0x00FF00  # Bright Green
 FOREGROUND_COLOR = 0xAA0088  # Purple
-TEXT_COLOR = 0xFFFF00
+TEXT_COLOR = 0x2222FF
 
 text="Ready"
 text_area = label.Label(terminalio.FONT, text=text, color=TEXT_COLOR)
@@ -95,7 +101,9 @@ while True:
     power = constrain(power+new, 0., 100.)
     fan.throttle = power / 100.
 
-    print (f"{current:^4.2f}, {error:^4.2f}, {new:^5.3f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+    print (f"{current:^4.1f}, {error:^4.1f}, {new:^5.3f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
 
-    text_area.text = f"E: {error:7.2f}"
+    text_area.text = f"E: {error:7.1f}"
+    led_display.print(f"{current: 5.1f}")
+
     time.sleep(timeStep)
