@@ -2,175 +2,251 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Serial Real-Time Monitor</title>
+    <title>Full-Height PID Monitor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #ececec; display: flex; justify-content: center; padding: 20px; }
-        .card { background: white; width: 100%; max-width: 900px; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
-        #value-display { font-size: 64px; font-weight: bold; color: #008080; margin: 10px 0; font-variant-numeric: tabular-nums; }
-        .label { color: #666; text-transform: uppercase; letter-spacing: 1px; font-size: 14px; }
-        .controls { margin: 25px 0; display: flex; justify-content: center; gap: 10px; }
-        button { padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 8px; border: none; transition: all 0.2s; }
-        #btn-connect { background: #008080; color: white; }
-        #btn-connect:hover { background: #006666; }
-        #btn-stop { background: #ff4757; color: white; }
-        #btn-stop:disabled { background: #ccc; cursor: not-allowed; }
-        #btn-quit { background: #2f3542; color: white; }
-        .status { font-size: 12px; margin-top: 10px; color: #999; }
-        canvas { margin-top: 20px; max-height: 400px; }
+        :root { --primary: #008080; --setpoint: #e67e22; --secondary: #2f3542; --bg: #f1f2f6; }
+        
+        /* Layout to fill window height */
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); display: flex; justify-content: center; }
+
+        .container { 
+            background: white; 
+            width: 98vw; 
+            height: 96vh; 
+            margin-top: 1vh;
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        /* Top Row: Controls */
+        .control-panel { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 15px; 
+            margin-bottom: 15px; 
+            flex-shrink: 0; /* Prevents controls from shrinking */
+        }
+        .ui-group { background: #dfdfdf; padding: 12px; border-radius: 10px; border: 1px solid #e0e0e0; }
+        .ui-header { font-size: 14px; font-weight: bold; color: #777; text-transform: uppercase; margin-bottom: 8px; display: block; }
+        
+        /* Middle Row: Dashboard Panels */
+        .dashboard-row { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr 1fr; 
+            gap: 15px; 
+            margin-bottom: 15px;
+            flex-shrink: 0;
+        }
+        .data-panel { background: #d8e8ed; padding: 15px; border-radius: 12px; border: 1px solid #e8e8e8; text-align: center; }
+        .panel-header { font-size: 14px; font-weight: bold; color: #555; text-transform: uppercase; margin-bottom: 10px; display: block; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+        
+        /* Values Formatting */
+        .label-text { font-size: 14px; font-weight: bold; color: #888; margin-bottom: 4px; display: block; }
+        .value-text { font-size: 24px; font-weight: 800; color: #222; font-family: 'Courier New', Courier, monospace; }
+        #val-height { font-size: 48px; font-weight: 900; color: var(--primary); font-family: 'Courier New', Courier, monospace; line-height: 1; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+
+        /* Bottom Section: Chart takes all remaining space */
+        .chart-container { 
+            flex-grow: 1; 
+            position: relative; 
+            width: 100%; 
+            min-height: 0; /* Critical for flex-grow to work in some browsers */
+        }
+
+        /* Shared UI Elements */
+        .input-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 14px; font-weight: 600; }
+        input { width: 60px; padding: 4px; border: 2px solid #ddd; border-radius: 5px; font-weight: bold; }
+        .actions { display: flex; gap: 8px; margin-top: 5px; }
+        button { flex: 1; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; font-size: 12px; text-transform: uppercase; transition: 0.2s; }
+        .btn-primary { background: var(--primary); }
+        .btn-secondary { background: var(--secondary); }
+        .btn-danger { background: #c0392b; }
+        button:disabled { opacity: 0.3; }
+        button:hover:not(:disabled) { filter: brightness(90%); }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <div class="label">Current Reading (Index 1)</div>
-    <div id="value-display">0.00</div>
-    
-    <div class="controls">
-        <button id="btn-connect">Connect to Device</button>
-        <button id="btn-stop" disabled>Stop Plotting</button>
-        <button id="btn-quit" onclick="location.reload()">Quit / Reset</button>
+<div class="container">
+    <div class="control-panel">
+        <div class="ui-group">
+            <span class="ui-header">Hardware Connection</span>
+            <button id="btn-connect" class="btn-primary" style="width: 100%;">Connect Device</button>
+            <div class="actions">
+                <button id="btn-pause" class="btn-secondary" disabled>Pause Plot</button>
+                <button id="btn-reset" class="btn-danger">Clear History</button>
+            </div>
+        </div>
+        <div class="ui-group">
+            <span class="ui-header">View Settings</span>
+            <div class="input-row"><label>Max Points:</label><input type="number" id="max-points" value="1200"></div>
+            <div class="input-row"><label>Window (s):</label><input type="number" id="time-window" value="60"></div>
+        </div>
+        <div class="ui-group">
+            <span class="ui-header">Data Logging</span>
+            <button id="btn-download" class="btn-secondary" style="width: 100%; margin-top: 5px;">Download Session .CSV</button>
+        </div>
     </div>
 
-    <div class="status" id="conn-status">Status: Disconnected</div>
+    <div class="dashboard-row">
+        <div class="data-panel">
+            <span class="panel-header">Measured Height</span>
+            <div id="val-height">0.00</div>
+        </div>
 
-    <canvas id="realTimeChart"></canvas>
+        <div class="data-panel">
+            <span class="panel-header">Control Status</span>
+            <div class="stats-grid">
+                <div class="sub-box"><span class="label-text">Setpoint</span><div id="val-setpoint" class="value-text">0.0</div></div>
+                <div class="sub-box"><span class="label-text">Error</span><div id="val-error" class="value-text">0.0</div></div>
+                <div class="sub-box"><span class="label-text">Power %</span><div id="val-power" class="value-text">0.0</div></div>
+            </div>
+        </div>
+
+        <div class="data-panel">
+            <span class="panel-header">Tuning Parameters</span>
+            <div class="stats-grid">
+                <div class="sub-box"><span class="label-text">P</span><div id="val-p" class="value-text">0.0000</div></div>
+                <div class="sub-box"><span class="label-text">I</span><div id="val-i" class="value-text">0.0000</div></div>
+                <div class="sub-box"><span class="label-text">D</span><div id="val-d" class="value-text">0.0000</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="realTimeChart"></canvas>
+    </div>
 </div>
 
 <script>
-    let port;
-    let reader;
-    let keepReading = true;
-    let isPlotting = true;
-    const WINDOW_SECONDS = 120; // 2 Minute Fixed Window
-    const startTime = Date.now();
+    let port, reader, isPaused = false;
+    let lastProcessedTime = Date.now(), cumulativeActiveTime = 0, allCollectedData = [];
 
-    // --- Chart.js Configuration ---
     const ctx = document.getElementById('realTimeChart').getContext('2d');
     const chart = new Chart(ctx, {
         type: 'line',
         data: {
-            datasets: [{
-                label: 'Serial Data (Index 1)',
-                borderColor: '#008080',
-                backgroundColor: 'rgba(0, 128, 128, 0.1)',
-                borderWidth: 2,
-                data: [],
-                pointRadius: 0,
-                fill: true,
-                tension: 0.2
-            }]
+            datasets: [
+                { label: 'Height (Measured)', borderColor: '#008080', data: [], pointRadius: 0, borderWidth: 3, fill: false },
+                { label: 'Setpoint (Target)', borderColor: '#e67e22', data: [], pointRadius: 0, borderWidth: 3, fill: false }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
             scales: {
-                x: {
-                    type: 'linear',
-                    position: 'bottom',
-                    title: { display: true, text: 'Elapsed Time (seconds)' },
-                    grid: { color: '#f0f0f0' }
+                x: { 
+                    type: 'linear', 
+                    title: { display: true, text: 'Time (Seconds)', font: { size: 18, weight: 'bold' } }, 
+                    ticks: { font: { size: 18, weight: 'bold' } } 
                 },
-                y: {
-                    beginAtZero: true,
-                    suggestedMax: 100,
-                    grid: { color: '#f0f0f0' }
+                y: { 
+                    grace: '10%', 
+                    title: { display: true, text: 'Value', font: { size: 18, weight: 'bold' } },
+                    ticks: { font: { size: 18, weight: 'bold' } } 
                 }
             },
             plugins: {
-                legend: { display: false }
+                legend: { labels: { font: { size: 16, weight: 'bold' } }, position: 'top' }
             }
         }
     });
 
-    // --- Web Serial Logic ---
     async function initSerial() {
         try {
-            // Filter is empty to allow picking any serial device
             port = await navigator.serial.requestPort();
             await port.open({ baudRate: 9600 });
-            
             document.getElementById('btn-connect').disabled = true;
-            document.getElementById('btn-stop').disabled = false;
-            document.getElementById('conn-status').innerText = "Status: Connected to " + (port.getInfo().usbVendorId || "Serial Device");
-
+            document.getElementById('btn-pause').disabled = false;
+            lastProcessedTime = Date.now();
             readLoop();
-        } catch (err) {
-            console.error("Serial Error:", err);
-            alert("Connection failed. Check permissions or ensure device isn't used by another app.");
-        }
+        } catch (err) { console.error(err); }
     }
 
     async function readLoop() {
         const textDecoder = new TextDecoderStream();
-        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        port.readable.pipeTo(textDecoder.writable);
         reader = textDecoder.readable.getReader();
-
         let buffer = "";
-
-        try {
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-
-                buffer += value;
-                let lines = buffer.split('\n');
-                buffer = lines.pop(); // Hold partial line
-
-                for (let line of lines) {
-                    if (line.trim() && isPlotting) {
-                        processCSV(line.trim());
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("Read Error:", error);
-        } finally {
-            reader.releaseLock();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += value;
+            let lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (let line of lines) processData(line.trim());
         }
     }
 
-    function processCSV(line) {
-        const parts = line.split(',');
-        // Targeting the second element (Index 1) per your requirement
-        if (parts.length >= 2) {
-            const val = parseFloat(parts[1]);
-            const elapsed = (Date.now() - startTime) / 1000;
+    function processData(line) {
+        const now = Date.now();
+        const deltaTime = (now - lastProcessedTime) / 1000;
+        lastProcessedTime = now;
 
-            if (!isNaN(val)) {
-                // 1. Update Big Number
-                document.getElementById('value-display').innerText = val.toFixed(2);
-                
-                // 2. Add to Chart
-                const data = chart.data.datasets[0].data;
-                data.push({ x: elapsed, y: val });
+        const p = line.split(',');
+        if (p.length >= 7) {
+            const h = parseFloat(p[0]), err = parseFloat(p[1]), sp = parseFloat(p[2]);
+            const pwr = parseFloat(p[3]), kP = parseFloat(p[4]), kI = parseFloat(p[5]), kD = parseFloat(p[6]);
 
-                // 3. Maintain 120s History (Prune old data to save memory)
-                const cutoff = elapsed - WINDOW_SECONDS;
-                while (data.length > 0 && data[0].x < (cutoff - 10)) {
-                    data.shift();
+            document.getElementById('val-height').innerText = h.toFixed(2);
+            document.getElementById('val-setpoint').innerText = sp.toFixed(1);
+            document.getElementById('val-error').innerText = err.toFixed(2);
+            document.getElementById('val-power').innerText = pwr.toFixed(1);
+            document.getElementById('val-p').innerText = kP.toFixed(4);
+            document.getElementById('val-i').innerText = kI.toFixed(4);
+            document.getElementById('val-d').innerText = kD.toFixed(4);
+
+            if (!isPaused) {
+                cumulativeActiveTime += deltaTime;
+                allCollectedData.push({ t: cumulativeActiveTime.toFixed(3), h, sp, err, pwr, kP, kI, kD });
+                chart.data.datasets[0].data.push({ x: cumulativeActiveTime, y: h });
+                chart.data.datasets[1].data.push({ x: cumulativeActiveTime, y: sp });
+
+                const max = parseInt(document.getElementById('max-points').value) || 1200;
+                while (chart.data.datasets[0].data.length > max) {
+                    chart.data.datasets[0].data.shift();
+                    chart.data.datasets[1].data.shift();
                 }
 
-                // 4. Update Fixed 2m Window Axis
-                chart.options.scales.x.min = Math.max(0, cutoff);
-                chart.options.scales.x.max = elapsed + 1; // Small buffer on right
-                
-                chart.update('none'); 
+                const win = parseFloat(document.getElementById('time-window').value) || 60;
+                chart.options.scales.x.min = Math.max(0, cumulativeActiveTime - win);
+                chart.options.scales.x.max = cumulativeActiveTime;
+                chart.update('none');
             }
         }
     }
 
-    // --- UI Listeners ---
-    document.getElementById('btn-connect').addEventListener('click', initSerial);
+    document.getElementById('btn-reset').onclick = () => {
+        allCollectedData = []; 
+        chart.data.datasets.forEach(d => d.data = []);
+        cumulativeActiveTime = 0; 
+        lastProcessedTime = Date.now();
+        chart.update();
+    };
 
-    document.getElementById('btn-stop').addEventListener('click', function() {
-        isPlotting = !isPlotting;
-        this.innerText = isPlotting ? "Stop Plotting" : "Resume Plotting";
-        this.style.background = isPlotting ? "#ff4757" : "#ffa502";
-    });
+    document.getElementById('btn-download').onclick = () => {
+        let csv = "data:text/csv;charset=utf-8,Time_s,Height_cm,Setpoint_cm,Error_cm,Power_pct,kP,kI,kD\n" + 
+                  allCollectedData.map(e => `${e.t},${e.h},${e.sp},${e.err},${e.pwr},${e.kP},${e.kI},${e.kD}`).join("\n");
+        const link = document.createElement("a");
+        link.setAttribute("href", encodeURI(csv));
+        link.setAttribute("download", "pid_data.csv");
+        link.click();
+    };
+
+    document.getElementById('btn-connect').onclick = initSerial;
+    document.getElementById('btn-pause').onclick = function() {
+        isPaused = !isPaused;
+        this.innerText = isPaused ? "Resume Plot" : "Pause Plot";
+        if (!isPaused) lastProcessedTime = Date.now();
+    };
 </script>
-
 </body>
 </html>
