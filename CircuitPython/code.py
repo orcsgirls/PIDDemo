@@ -1,16 +1,64 @@
 import time
 import board
-import digitalio
 import pwmio
 import displayio
 import terminalio
 import adafruit_vl53l4cd
+from digitalio import DigitalInOut, Direction, Pull
 from adafruit_display_text import label
 from rainbowio import colorwheel
 from adafruit_simplemath import map_range, constrain
 from adafruit_motor.motor import DCMotor
 from adafruit_seesaw import digitalio, rotaryio, seesaw, neopixel
 from adafruit_ht16k33.segments import Seg7x4
+
+#------------------------------------------------------------------------------------------------
+
+class Button():
+    def __init__(self, pin, pull=Pull.UP):
+        self.btn = DigitalInOut(pin)
+        self.btn.switch_to_input(pull=pull)
+        self.lastState = self.btn.value
+
+    def isPressed(self):
+        currentState = self.btn.value
+        if currentState != self.lastState:
+            self.lastState=currentState
+            return currentState
+        else:
+            return False
+
+    @property
+    def value(self):
+        return self.btn.value
+
+#------------------------------------------------------------------------------------------------
+
+class Encoder():
+    def __init__(self, i2c, address):
+        self.i2c = i2c
+        self.qt_enc = seesaw.Seesaw(self.i2c, addr=address)
+        self.encoder = rotaryio.IncrementalEncoder(self.qt_enc)
+        self.pixel = neopixel.NeoPixel(self.qt_enc, 6, 1)
+        self.qt_enc.pin_mode(24, self.qt_enc.INPUT_PULLUP)
+        self.button = digitalio.DigitalIO(self.qt_enc, 24)
+
+        self.pixel.brightness = 0.2
+        self.pixel.fill(0x00ff00)
+
+    @property
+    def position(self):
+        return self.encoder.position
+
+    @position.setter
+    def position(self, position):
+        self.encoder.position = position
+
+#------------------------------------------------------------------------------------------------
+
+buttonD0 = Button(board.D0, pull=Pull.UP)
+buttonD1 = Button(board.D1, pull=Pull.DOWN)
+buttonD2 = Button(board.D2, pull=Pull.DOWN)
 
 pwm1 = pwmio.PWMOut(board.A1, duty_cycle=2 ** 15, frequency=25000)
 pwm2 = pwmio.PWMOut(board.A0, duty_cycle=2 ** 15, frequency=25000)
@@ -22,15 +70,14 @@ led_display = Seg7x4(i2c)
 led_display.brightness = 0.5
 
 sensor = adafruit_vl53l4cd.VL53L4CD(i2c)
-#sensor.measurement_timing_budget = 33000 # 33ms is the default - longer more accurate but slower
 sensor.inter_measurement = 0
 sensor.timing_budget = 200
 
-qt_enc1 = seesaw.Seesaw(i2c, addr=0x36)
-qt_enc2 = seesaw.Seesaw(i2c, addr=0x37)
-qt_enc3 = seesaw.Seesaw(i2c, addr=0x38)
+encoderP = Encoder(i2c, 0x36)
+encoderI = Encoder(i2c, 0x37)
+encoderD = Encoder(i2c, 0x38)
 
-pixels = [neopixel.NeoPixel(qt_enc1, 6, 1),neopixel.NeoPixel(qt_enc2, 6, 1),neopixel.NeoPixel(qt_enc3, 6, 1)]
+#pixels = [neopixel.NeoPixel(qt_enc1, 6, 1),neopixel.NeoPixel(qt_enc2, 6, 1),neopixel.NeoPixel(qt_enc3, 6, 1)]
 
 display = board.DISPLAY
 splash = displayio.Group()
@@ -52,21 +99,13 @@ text_group = displayio.Group(
 text_group.append(text_area)  # Subgroup for text scaling
 splash.append(text_group)
 
-for p in pixels:
-    p.brightness = 0.2
-    p.fill(0x00ff00)
-
-encoderP = rotaryio.IncrementalEncoder(qt_enc1)
-encoderI = rotaryio.IncrementalEncoder(qt_enc2)
-encoderD = rotaryio.IncrementalEncoder(qt_enc3)
-
 cumError = 0
 rateError = 0
 lastError = 0
-timeStep = 0.1
+timeStep = 0.2
 
 # PIDs to tune
-encoderP.position = 1
+encoderP.position = 10
 encoderI.position = 0
 encoderD.position = 0
 
@@ -77,33 +116,47 @@ power=70.
 setPoint = 10.0
 
 # Encoder increment
-enc_step = 0.001
+enc_step = 0.0002
 
 sensor.start_ranging()
 
-while True:
-    while not sensor.data_ready:
-        pass
-    sensor.clear_interrupt()
+try:
+    while True:
+        while not sensor.data_ready:
+            pass
+        sensor.clear_interrupt()
 
-    kP = constrain(encoderP.position * enc_step, 0.0, 1.0)
-    kI = constrain(encoderI.position * enc_step, 0.0, 1.0)
-    kD = constrain(encoderD.position * enc_step, 0.0, 1.0)
+        kP = constrain(encoderP.position * enc_step, 0.0, 1.0)
+        kI = constrain(encoderI.position * enc_step, 0.0, 1.0)
+        kD = constrain(encoderD.position * enc_step, 0.0, 1.0)
 
-    current = sensor.distance
-    error = current - setPoint
-    cumError += error * timeStep
-    cumError = 0 if ((error > 0 and lastError < 0) or (error < 0 and lastError > 0)) else cumError
-    rateError = (error - lastError)/timeStep
-    lastError = error
+        current = sensor.distance
+        error = current - setPoint
+        if(kI > 0):
+            cumError += error * timeStep
+            cumError = 0 if ((error > 0 and lastError < 0) or (error < 0 and lastError > 0)) else cumError
+        else:
+            cumError = 0
+        rateError = (error - lastError)/timeStep
+        lastError = error
 
-    new = kP*error + kI*cumError + kD*rateError
-    power = constrain(power+new, 0., 100.)
-    fan.throttle = power / 100.
+        new = kP*error + kI*cumError + kD*rateError
+        power = constrain(power+new, 0., 100.)
+        fan.throttle = power / 100.
 
-    print (f"{current:^4.1f}, {error:^4.1f}, {new:^5.3f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+        # Update outputs
+        print (f"{current:^4.1f}, {error:^4.1f}, {setPoint:^4.1f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+        text_area.text = f"E: {error:7.1f}"
+        led_display.print(f"{current: 5.1f}")
 
-    text_area.text = f"E: {error:7.1f}"
-    led_display.print(f"{current: 5.1f}")
+        # Buttons
+        if buttonD0.isPressed() and setPoint < 25:
+            setPoint = setPoint + 5
+        if buttonD1.isPressed() and setPoint > 10:
+            setPoint = setPoint - 5
 
-    time.sleep(timeStep)
+        time.sleep(timeStep)
+
+except KeyboardInterrupt:
+    sensor.stop_ranging()
+    pass
