@@ -1,4 +1,5 @@
 import time
+import math
 import board
 import pwmio
 import displayio
@@ -6,9 +7,10 @@ import terminalio
 import adafruit_vl53l4cd
 from digitalio import DigitalInOut, Direction, Pull
 from adafruit_display_text import label
+from adafruit_display_shapes.rect import Rect
 from rainbowio import colorwheel
 from adafruit_simplemath import map_range, constrain
-from adafruit_motor.motor import DCMotor
+from adafruit_motor.motor import DCMotor, SLOW_DECAY, FAST_DECAY
 from adafruit_seesaw import digitalio, rotaryio, seesaw, neopixel
 from adafruit_ht16k33.segments import Seg7x4
 
@@ -48,6 +50,8 @@ class Encoder():
 
     @property
     def position(self):
+        if self.encoder.position < 0:
+            self.encoder.position = 0
         return self.encoder.position
 
     @position.setter
@@ -56,18 +60,75 @@ class Encoder():
 
 #------------------------------------------------------------------------------------------------
 
+class Fan():
+    def __init__(self, pinA, pinB, frequency=20):
+        pwm1 = pwmio.PWMOut(pinA, duty_cycle=2 ** 15, frequency=frequency)
+        pwm2 = pwmio.PWMOut(pinB, duty_cycle=2 ** 15, frequency=frequency)
+        self.fan = DCMotor(pwm1, pwm2)
+        self.fan.decay_mode = FAST_DECAY
+
+    @property
+    def power(self):
+        return self.fan.throttle * 100.
+
+    @power.setter
+    def power(self, power):
+        self.fan.throttle = power / 100.
+
+#------------------------------------------------------------------------------------------------
+
+class Screen():
+    def __init__(self):
+        FONTSCALE = 3
+        TEXT_COLOR = 0x2222FF
+        EXTRA_COLOR = 0xAAAAFF
+        BAR_COLOR = 0xFF0000
+        BAR_BACKGROUND = 0x2222FF
+        BAR_WIDTH = 25
+        MARGIN = 5
+
+        self.display = board.DISPLAY
+        self.splash = displayio.Group()
+        self.display.root_group = self.splash
+
+        self.text_box = displayio.Group(scale=FONTSCALE, x=0, y=0)
+        self.text_height = 10
+        self.top    = label.Label(terminalio.FONT, color=TEXT_COLOR , text="t", x=MARGIN, y=self.text_height)
+        self.middle = label.Label(terminalio.FONT, color=TEXT_COLOR , text="m", x=MARGIN, y=self.text_height * 2)
+        self.bottom = label.Label(terminalio.FONT, color=TEXT_COLOR , text="b", x=MARGIN, y=self.text_height * 3)
+        self.extra = label.Label(terminalio.FONT, color=EXTRA_COLOR , text="S", x=MARGIN, y=self.text_height * 4)
+
+        self.text_box.append(self.top)
+        self.text_box.append(self.middle)
+        self.text_box.append(self.bottom)
+        self.text_box.append(self.extra)
+
+        self.bar_back_box = displayio.Group(x=self.display.width - BAR_WIDTH - MARGIN, y=0)
+        self.bar_back = Rect(x=0, y=MARGIN, width=BAR_WIDTH, height=self.display.height-MARGIN, fill=BAR_BACKGROUND)
+        self.bar_back_box.append(self.bar_back)
+
+        self.splash.append(self.text_box)
+        self.splash.append(self.bar_back_box)
+
+    def bar(self, error):
+        if(math.fabs(error) < 1.5):
+            self.bar_back.fill = 0x00cc00
+        elif(math.fabs(error) < 3.0):
+            self.bar_back.fill = 0xaaaa00
+        else:
+            self.bar_back.fill = 0xaa0000
+
+#------------------------------------------------------------------------------------------------
+
 buttonD0 = Button(board.D0, pull=Pull.UP)
 buttonD1 = Button(board.D1, pull=Pull.DOWN)
 buttonD2 = Button(board.D2, pull=Pull.DOWN)
 
-pwm1 = pwmio.PWMOut(board.A1, duty_cycle=2 ** 15, frequency=25000)
-pwm2 = pwmio.PWMOut(board.A0, duty_cycle=2 ** 15, frequency=25000)
-fan = DCMotor(pwm1, pwm2)
+fan = Fan(board.A1, board.A0, frequency=20)
 
 i2c = board.I2C()
-
 led_display = Seg7x4(i2c)
-led_display.brightness = 0.5
+led_display.brightness = 0.4
 
 sensor = adafruit_vl53l4cd.VL53L4CD(i2c)
 sensor.inter_measurement = 0
@@ -77,28 +138,9 @@ encoderP = Encoder(i2c, 0x36)
 encoderI = Encoder(i2c, 0x37)
 encoderD = Encoder(i2c, 0x38)
 
-#pixels = [neopixel.NeoPixel(qt_enc1, 6, 1),neopixel.NeoPixel(qt_enc2, 6, 1),neopixel.NeoPixel(qt_enc3, 6, 1)]
+screen = Screen()
 
-display = board.DISPLAY
-splash = displayio.Group()
-display.root_group = splash
-
-FONTSCALE = 3
-BACKGROUND_COLOR = 0x00FF00  # Bright Green
-FOREGROUND_COLOR = 0xAA0088  # Purple
-TEXT_COLOR = 0x2222FF
-
-text="Ready"
-text_area = label.Label(terminalio.FONT, text=text, color=TEXT_COLOR)
-text_width = text_area.bounding_box[2] * FONTSCALE
-text_group = displayio.Group(
-    scale=FONTSCALE,
-    x=0,
-    y=display.height // 2,
-)
-text_group.append(text_area)  # Subgroup for text scaling
-splash.append(text_group)
-
+# Some initialisations
 cumError = 0
 rateError = 0
 lastError = 0
@@ -110,13 +152,13 @@ encoderI.position = 0
 encoderD.position = 0
 
 # Lift off value
-power=70.
+fan.power = 40.
 
 # Setpoint location in mm
 setPoint = 10.0
 
 # Encoder increment
-enc_step = 0.0002
+enc_step = 0.0001
 
 sensor.start_ranging()
 
@@ -126,9 +168,9 @@ try:
             pass
         sensor.clear_interrupt()
 
-        kP = constrain(encoderP.position * enc_step, 0.0, 1.0)
-        kI = constrain(encoderI.position * enc_step, 0.0, 1.0)
-        kD = constrain(encoderD.position * enc_step, 0.0, 1.0)
+        kP = encoderP.position * enc_step
+        kI = encoderI.position * enc_step
+        kD = encoderD.position * enc_step
 
         current = sensor.distance
         error = current - setPoint
@@ -141,12 +183,19 @@ try:
         lastError = error
 
         new = kP*error + kI*cumError + kD*rateError
-        power = constrain(power+new, 0., 100.)
-        fan.throttle = power / 100.
+        fan.power = constrain(fan.power+new, 0., 100.)
 
         # Update outputs
-        print (f"{current:^4.1f}, {error:^4.1f}, {setPoint:^4.1f}, {power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
-        text_area.text = f"E: {error:7.1f}"
+        print (f"{current:^4.1f}, {error:^4.1f}, {setPoint:^4.1f}, {fan.power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+
+        # Screen update
+        screen.top.text = f"P: {kP:.4f}"
+        screen.middle.text = f"I: {kI:.4f}"
+        screen.bottom.text = f"D: {kD:.4f}"
+        screen.extra.text = f"S:   {setPoint:^5.1f}"
+        screen.bar(error)
+
+        #7 Segment disply update
         led_display.print(f"{current: 5.1f}")
 
         # Buttons
