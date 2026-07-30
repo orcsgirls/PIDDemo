@@ -249,9 +249,6 @@ enc_step = 0.0001
 screen_mode = 0
 
 sensor.start_ranging()
-
-sensor.start_ranging()
-
 lastRun = time.monotonic()
 
 try:
