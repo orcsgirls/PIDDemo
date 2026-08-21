@@ -5,16 +5,15 @@ import pwmio
 import displayio
 import terminalio
 import adafruit_vl53l4cd
-from digitalio import DigitalInOut, Direction, Pull
+from digitalio import DigitalInOut, Pull
 from adafruit_display_text import label
 from adafruit_display_shapes.rect import Rect
-from rainbowio import colorwheel
 from adafruit_simplemath import map_range, constrain
-from adafruit_motor.motor import DCMotor, SLOW_DECAY, FAST_DECAY
+from adafruit_motor.motor import DCMotor, FAST_DECAY
 from adafruit_seesaw import digitalio, rotaryio, seesaw, neopixel
 from adafruit_ht16k33.segments import Seg7x4
 
-#------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 class Button():
     def __init__(self, pin, pull=Pull.UP):
@@ -25,7 +24,7 @@ class Button():
     def isPressed(self):
         currentState = self.btn.value
         if currentState != self.lastState:
-            self.lastState=currentState
+            self.lastState = currentState
             return currentState
         else:
             return False
@@ -34,7 +33,7 @@ class Button():
     def value(self):
         return self.btn.value
 
-#------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 class Encoder():
     def __init__(self, i2c, address):
@@ -60,13 +59,13 @@ class Encoder():
 
     @property
     def color(self):
-        pass
+        return None
 
     @color.setter
     def color(self, value):
         self.pixel.fill(value)
 
-#------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 class Fan():
     def __init__(self, pinA, pinB, frequency=20):
@@ -83,14 +82,13 @@ class Fan():
     def power(self, power):
         self.fan.throttle = power / 100.
 
-#------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 class Screen():
     def __init__(self):
         FONTSCALE = 3
         TEXT_COLOR = 0x2222FF
         EXTRA_COLOR = 0xAAAAFF
-        BAR_COLOR = 0xFF0000
         BAR_BACKGROUND = 0x2222FF
         BAR_WIDTH = 25
         MARGIN = 5
@@ -102,10 +100,10 @@ class Screen():
 
         self.text_box = displayio.Group(scale=FONTSCALE, x=0, y=0)
         self.text_height = 10
-        self.top    = label.Label(terminalio.FONT, color=TEXT_COLOR , text="t", x=MARGIN, y=self.text_height)
-        self.middle = label.Label(terminalio.FONT, color=TEXT_COLOR , text="m", x=MARGIN, y=self.text_height * 2)
-        self.bottom = label.Label(terminalio.FONT, color=TEXT_COLOR , text="b", x=MARGIN, y=self.text_height * 3)
-        self.extra = label.Label(terminalio.FONT, color=EXTRA_COLOR , text="S", x=MARGIN, y=self.text_height * 4)
+        self.top    = label.Label(terminalio.FONT, color=TEXT_COLOR, text="t", x=MARGIN, y=self.text_height)
+        self.middle = label.Label(terminalio.FONT, color=TEXT_COLOR, text="m", x=MARGIN, y=self.text_height * 2)
+        self.bottom = label.Label(terminalio.FONT, color=TEXT_COLOR, text="b", x=MARGIN, y=self.text_height * 3)
+        self.extra  = label.Label(terminalio.FONT, color=EXTRA_COLOR, text="S", x=MARGIN, y=self.text_height * 4)
 
         self.text_box.append(self.top)
         self.text_box.append(self.middle)
@@ -113,13 +111,13 @@ class Screen():
         self.text_box.append(self.extra)
 
         self.bar_back_box = displayio.Group(x=self.display.width - BAR_WIDTH - MARGIN, y=0)
-        self.bar_back = Rect(x=0, y=MARGIN, width=BAR_WIDTH, height=self.display.height-MARGIN, fill=BAR_BACKGROUND)
+        self.bar_back = Rect(x=0, y=MARGIN, width=BAR_WIDTH, height=self.display.height - MARGIN, fill=BAR_BACKGROUND)
         self.bar_back_box.append(self.bar_back)
 
         self.splash.append(self.text_box)
         self.splash.append(self.bar_back_box)
 
- # ---- Graph surface (mode 2) --------------------------------------
+        # ---- Graph surface (mode 2) --------------------------------------
         GRAPH_BG       = 0x000022
         GRAPH_TRACE    = 0x00ff00
         GRAPH_SETPOINT = 0xffaa00
@@ -143,7 +141,7 @@ class Screen():
         self.splash.append(self.graph_box)
         self.graph_box.hidden = True
 
-        # mm range mapped onto the graph height, and the rolling sample buffer
+        # Range mapped onto the graph height, and the rolling sample buffer
         self.graph_min  = 1.0
         self.graph_max  = 33.0
         self.max_points = self.graph_width
@@ -153,9 +151,9 @@ class Screen():
         self.display.refresh()
 
     def bar(self, error):
-        if(math.fabs(error) < 1.5):
+        if math.fabs(error) < 1.5:
             self.bar_back.fill = 0x00cc00
-        elif(math.fabs(error) < 3.0):
+        elif math.fabs(error) < 3.0:
             self.bar_back.fill = 0xaaaa00
         else:
             self.bar_back.fill = 0xaa0000
@@ -169,13 +167,11 @@ class Screen():
         self.graph_box.hidden = False
 
     def _to_y(self, value):
-        # Map a height in mm to a pixel row (top = graph_max, bottom = graph_min)
         y = map_range(value, self.graph_min, self.graph_max,
                       self.graph_height - 1, 0)
         return int(constrain(y, 0, self.graph_height - 1))
 
     def graph(self, current, setPoint):
-        # Record the newest sample, keeping the buffer to the graph width
         self.history.append(current)
         if len(self.history) > self.max_points:
             self.history.pop(0)
@@ -187,8 +183,7 @@ class Screen():
         for x in range(self.graph_width):
             self.graph_bitmap[x, sp_y] = 2
 
-        # Height trace (index 1), newest sample flush to the right edge.
-        # Connect consecutive samples with a vertical run so it reads as a line.
+        # Height trace (index 1)
         n = len(self.history)
         prev_y = None
         for i in range(n):
@@ -203,7 +198,8 @@ class Screen():
                 for yy in range(min(prev_y, y), max(prev_y, y) + 1):
                     self.graph_bitmap[x, yy] = 1
             prev_y = y
-#------------------------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------------------------
 
 buttonD0 = Button(board.D0, pull=Pull.UP)
 buttonD1 = Button(board.D1, pull=Pull.DOWN)
@@ -217,7 +213,7 @@ led_display.brightness = 0.4
 
 sensor = adafruit_vl53l4cd.VL53L4CD(i2c)
 sensor.inter_measurement = 0
-sensor.timing_budget = 200
+sensor.timing_budget = 50   # 50 ms (or 33 ms if supported)
 
 encoderP = Encoder(i2c, 0x36)
 encoderI = Encoder(i2c, 0x37)
@@ -225,28 +221,31 @@ encoderD = Encoder(i2c, 0x38)
 
 screen = Screen()
 
-# Some initialisations
-cumError = 0
-rateError = 0
-lastError = 0
-timeStep = 0.2
+# --- Initial State & Loop Timing ---
+timeStep = 0.05             # 50 ms (20 Hz loop rate)
+setPoint = 10.0
+screen_mode = 0
 
-# PIDs to tune
-encoderP.position = 10
+enc_step_P = 0.01
+enc_step_I = 0.005
+enc_step_D = 0.005
+
+# Encoder initial positions
+encoderP.position = 0
 encoderI.position = 0
 encoderD.position = 0
 
-# Lift off value
-fan.power = 50.
+# --- Configuration Constants ---
+HOVER_BIAS    = 35.0   # % power needed to roughly float the ball in the middle
+MIN_FAN_POWER = 17.0   # Minimum floor to prevent motor stall
+MAX_FAN_POWER = 100.0
+MAX_INTEGRAL  = 20.0
+ALPHA_FILTER  = 0.5    # Higher alpha = less phase delay
 
-# Setpoint location in mm
-setPoint = 10.0
-
-# Encoder increment
-enc_step = 0.0001
-
-# Screen mode
-screen_mode = 0
+# Persistent PID & Filter States
+cumError = 0.0
+filtered_distance = None
+last_distance = None
 
 sensor.start_ranging()
 lastRun = time.monotonic()
@@ -255,41 +254,71 @@ try:
     while True:
         # --- Poll buttons every pass so they feel responsive -------------
         if buttonD0.isPressed() and setPoint <= 24:
-            setPoint = setPoint + 2
+            setPoint += 2
         if buttonD1.isPressed() and setPoint >= 8:
-            setPoint = setPoint - 2
+            setPoint -= 2
         if buttonD2.isPressed():
             screen_mode = (screen_mode + 1) % 3
 
         # --- Heavy work (sensor, PID, display) only every timeStep -------
-        if sensor.data_ready and (time.monotonic() - lastRun) >= timeStep:
-            lastRun = time.monotonic()
+        now = time.monotonic()
+        dt = now - lastRun
+        if sensor.data_ready and dt >= timeStep:
+            lastRun = now
             sensor.clear_interrupt()
 
-            kP = encoderP.position * enc_step
-            kI = encoderI.position * enc_step
-            kD = encoderD.position * enc_step
+            kP = encoderP.position * enc_step_P
+            kI = encoderI.position * enc_step_I
+            kD = encoderD.position * enc_step_D
 
             encoderP.color = 0xff0000 if kP == 0 else 0x00ff00
             encoderI.color = 0xff0000 if kI == 0 else 0x00ff00
             encoderD.color = 0xff0000 if kD == 0 else 0x00ff00
 
-            current = sensor.distance
-            error = current - setPoint
-            if(kI > 0):
-                cumError += error * timeStep
-                cumError = 0 if ((error > 0 and lastError < 0) or (error < 0 and lastError > 0)) else cumError
+            raw_current = sensor.distance
+
+            # --- Sensor Low-Pass Filter (Dampening) ---
+            if filtered_distance is None:
+                filtered_distance = raw_current
+                last_distance = raw_current
             else:
-                cumError = 0
-            rateError = (error - lastError)/timeStep
-            lastError = error
+                filtered_distance = (ALPHA_FILTER * raw_current) + ((1.0 - ALPHA_FILTER) * filtered_distance)
 
-            new = kP*error + kI*cumError + kD*rateError
-            fan.power = constrain(fan.power+new, 0., 100.)
+            current = filtered_distance
 
-            print (f"{current:^4.1f}, {error:^4.1f}, {setPoint:^4.1f}, {fan.power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+            # --- 1. Error Calculation ---
+            error = current - setPoint
 
-            # Screen update
+            # --- 2. Derivative on Measurement (Prevents Setpoint Kick) ---
+            d_measurement = (current - last_distance) / dt if dt > 0 else 0.0
+            last_distance = current
+
+            # Push harder when too low to catch drops; reduce gently when too high
+            if error > 0:  # Ball too low
+                p_term = kP * 1.4 * error
+            else:          # Ball too high
+                p_term = kP * 0.6 * error
+
+            d_term = kD * d_measurement
+
+            # Anti-windup clamped integral
+            if kI > 0:
+                cumError += error * dt
+                max_i_accum = MAX_INTEGRAL / kI
+                cumError = constrain(cumError, -max_i_accum, max_i_accum)
+                i_term = kI * cumError
+            else:
+                cumError = 0.0
+                i_term = 0.0
+
+            # --- 4. Control Effort & Clamping ---
+            pid_correction = p_term + i_term + d_term
+            target_power = HOVER_BIAS + pid_correction
+            fan.power = constrain(target_power, MIN_FAN_POWER, MAX_FAN_POWER)
+
+            print(f"{current:^4.1f}, {error:^4.1f}, {setPoint:^4.1f}, {fan.power:^6.3f}, {kP:.4f}, {kI:.4f}, {kD:.4f}")
+
+            # --- Screen update ---
             if screen_mode == 0:
                 screen.show_text()
                 screen.top.text = f"P: {kP:.4f}"
@@ -309,17 +338,12 @@ try:
                 screen.graph(current, setPoint)
                 screen.bar(error)
 
-            # 7-segment display + one composed frame push
+            # 7-segment display + frame refresh
             led_display.print(f"{current: 5.1f}")
             screen.refresh()
 
-        # Small yield: keeps button polling fast without a 100% busy-spin
         time.sleep(0.005)
 
 except KeyboardInterrupt:
+    fan.power = 0.0
     sensor.stop_ranging()
-    pass
-
-except KeyboardInterrupt:
-    sensor.stop_ranging()
-    pass
